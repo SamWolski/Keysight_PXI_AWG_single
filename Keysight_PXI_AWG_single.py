@@ -220,6 +220,8 @@ class Driver(LabberDriver):
                 self.reportStatus(
                     'Sending waveform (%d/%d)' % (seq_no + 1, n_seq))
 
+                ## Get queue cycle mode for setting queueConfig
+                queue_cycle_mode = int(self.getCmdStringFromValue("Queue cycle mode"))
                 # always upload all channels in use, regardless of updated
                 for ch in awg_channels:
                     # waveform counter is unique id
@@ -229,7 +231,7 @@ class Driver(LabberDriver):
                     # configure channel-specific markers
                     self.configureMarker(ch)
                     # configure queue to run in cyclic mode
-                    self.AWG.AWGqueueConfig(self.getHwCh(ch), 1)
+                    self.AWG.AWGqueueConfig(self.getHwCh(ch), queue_cycle_mode)
 
             else:
                 # standard, non-hardware loop upload, stop all
@@ -282,6 +284,9 @@ class Driver(LabberDriver):
         # waveform memory is shared by all channels, use counter to increment
         waveform_counter = 0
 
+        ## Get queue cycle mode for setting queueConfig
+        queue_cycle_mode = int(self.getCmdStringFromValue("Queue cycle mode"))
+
         for ch in awg_channels:
             # flush queue
             self.AWG.AWGflush(self.getHwCh(ch))
@@ -304,7 +309,7 @@ class Driver(LabberDriver):
             # configure channel-specific markers
             self.configureMarker(ch)
             # configure queue to run in cyclic mode
-            self.AWG.AWGqueueConfig(self.getHwCh(ch), 1)
+            self.AWG.AWGqueueConfig(self.getHwCh(ch), queue_cycle_mode)
 
 
     def getAWGChannelsInUse(self):
