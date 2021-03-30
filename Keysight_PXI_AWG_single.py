@@ -1,9 +1,25 @@
 #!/usr/bin/env python
+import os
 import sys
+import logging
+from datetime import datetime
 from BaseDriver import LabberDriver, Error, IdError
 import numpy as np
 sys.path.append('C:\\Program Files (x86)\\Keysight\\SD1\\Libraries\\Python')
 import keysightSD1
+
+
+## Microsecond formatting for logger
+class MusecFormatter(logging.Formatter):
+    converter=datetime.fromtimestamp
+    def formatTime(self, record, datefmt=None):
+        ct = self.converter(record.created)
+        if datefmt:
+            s = ct.strftime(datefmt)
+        else:
+            t = ct.strftime("%y-%m-%d %H:%M:%S")
+            s = "%s.%03d" % (t, record.msecs)
+        return s
 
 
 class UploadFailed(Error):
@@ -15,6 +31,7 @@ class Driver(LabberDriver):
 
     def performOpen(self, options={}):
         """Perform the operation of opening the instrument connection"""
+        self.initLogger()
         # add compatibility with pre-1.5.4 version of Labber
         if not hasattr(self, 'getTrigChannel'):
             self.getTrigChannel = self._getTrigChannel
@@ -73,6 +90,28 @@ class Driver(LabberDriver):
         # clear old waveforms
         self.clearOldWaveforms()
 
+    def initLogger(self):
+        ## Dir and file setup
+        log_dir = os.path.expanduser("~/driver_logs/")
+        log_file = "AWG_single_{:%y%m%d_%H%M%S}.log".format(datetime.now())
+        log_path = os.path.join(log_dir, log_file)
+        ## Create log dir if it does not exist
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self._logger = logging.getLogger("AWG_single")
+        self._logger.setLevel(logging.DEBUG)
+        file_handler = logging.FileHandler(filename=log_path, mode="a")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(MusecFormatter(
+                                    fmt="%(asctime)s %(name)-8s: %(message)s",
+                                    datefmt="%y-%m-%d %H:%M:%S.%f"))
+        self._logger.addHandler(file_handler)
+        self._logger.info("Logging initialized to {}".format(log_path))
+        self._logger.debug("Using python version {}".format(sys.version_info))
+        self._logger.debug("Python installation is at {}".format(sys.executable))
+        # self._logger.debug("Imported modules (from sys.modules.keys()): {}".format(sys.modules.keys()))
+        self._logger.debug("sys.path is: {}".format(sys.path))
+
 
     def getHwCh(self, n):
         """Get hardware channel number for channel n. n starts at 0"""
@@ -108,6 +147,7 @@ class Driver(LabberDriver):
 
     def performArm(self, quant_names, options={}):
         """Perform the instrument arm operation"""
+        self._logger.debug("performArm called.")
         # restart AWG to make sure queue is at first element
         channel_mask = self.getEnabledChannelsMask()
         self.AWG.AWGstopMultiple(channel_mask)
@@ -206,11 +246,14 @@ class Driver(LabberDriver):
 
         # For effiency, we only upload the waveform at the final call
         if self.isFinalCall(options) and np.any(self.waveform_updated):
+            self._logger.info("Final call with updated waveforms.")
+
             # get list of AWG channels in use
             awg_channels = self.getAWGChannelsInUse()
 
             # do different uploading depending on normal or hardware loop
             if self.isHardwareLoop(options):
+                self._logger.debug("Hardware looping is on.")
                 seq_no, n_seq = self.getHardwareLoopIndex(options)
                 # Reset waveform ID counter if this is the first sequence
                 if seq_no == 0:
@@ -234,9 +277,11 @@ class Driver(LabberDriver):
                     self.AWG.AWGqueueConfig(self.getHwCh(ch), queue_cycle_mode)
 
             else:
+                self._logger.debug("No hardware looping")
                 # standard, non-hardware loop upload, stop all
                 self.AWG.AWGstopMultiple(self.getEnabledChannelsMask())
                 # try to upload and queue
+                self._logger.debug("Uploading and queueing waveforms...")
                 try:
                     self.uploadAndQueueWaveforms()
                 except UploadFailed:
@@ -247,6 +292,7 @@ class Driver(LabberDriver):
 
                 # don't start AWG if hardware trig, will be done when arming
                 if not self.isHardwareTrig(options):
+                    self._logger.debug("Starting AWG as in normal operation.")
                     self.AWG.AWGstartMultiple(self.getEnabledChannelsMask())
 
         return value
