@@ -3,10 +3,17 @@ import os
 import sys
 import logging
 from datetime import datetime
+import multiprocessing
+import threading
+
 from BaseDriver import LabberDriver, Error, IdError
 import numpy as np
 sys.path.append('C:\\Program Files (x86)\\Keysight\\SD1\\Libraries\\Python')
 import keysightSD1
+
+
+## multiprocessing parameters
+address = ("localhost", 50020)
 
 
 ## Microsecond formatting for logger
@@ -90,6 +97,11 @@ class Driver(LabberDriver):
         # clear old waveforms
         self.clearOldWaveforms()
 
+        ## Initialize "starter" thread
+        self.starter_thread = threading.Thread(target=self.starter, args=(AWGPart,))
+        self.starter_thread.start()
+
+
     def initLogger(self):
         ## Dir and file setup
         log_dir = os.path.expanduser("~/driver_logs/")
@@ -120,6 +132,14 @@ class Driver(LabberDriver):
 
     def performClose(self, bError=False, options={}):
         """Perform the close instrument connection operation"""
+        ## If the starter thread is still alive, we need to send a kill signal
+        if self.starter_thread.is_alive():
+            self._logger.debug("starter thread is alive at performClose; sending kill signal...")
+            ## Start connection object
+            conn = multiprocessing.connection.Client(address, authkey=b"p")
+            conn.send("q")
+            conn.close()
+            self._logger.debug("Kill signal sent.")
         # do not check for error if close was called with an error
         try:
             # clear old waveforms and stop awg
@@ -510,6 +530,48 @@ class Driver(LabberDriver):
             return
         # get error message
         raise Error(keysightSD1.SD_Error.getErrorMessage(code))
+
+
+
+    ## Multithreading
+
+    ## Listener thread for synchronized AWG start
+
+    def starter(self, AWGPart):
+        """Thread to send the start command to the AWG when receiving a message from the digitizer driver.
+        """
+        
+        ## Initialize AWG communication object
+        self._logger.debug("Initializing awg instance...")
+        awg = keysightSD1.SD_AOU()
+        awg.openWithSlot(AWGPart, self.chassis, int(self.comCfg.address))
+        
+        ## Initialize multiprocessing Listener
+        self._logger.debug("Initializing multiproc listener...")
+        listener = multiprocessing.connection.Listener(address, authkey=b"p")
+        ## Blocking accept call - will continue when digitizer connects
+        self._logger.debug("Listener initialized; accepting incoming connection...")
+        conn = listener.accept()
+        ## Wait to receive message from digitizer
+        self._logger.debug("Listener connection opened; waiting for request from digitizer...")
+        req = conn.recv()
+        if req == "q":
+            self._logger.debug("starter thread received kill signal.")
+            return
+        self._logger.debug("Digitizer request received; sending response...")
+        ## Send response to digitizer
+        conn.send("")
+        self._logger.debug("Response sent.")
+        ## Close listener object
+        conn.close()
+        listener.close()
+
+        ## Restart AWG
+        self._logger.debug("Stopping AWG in subthread...")
+        awg.AWGstopMultiple(self.getEnabledChannelsMask())
+        ## Start AWG
+        self._logger.debug("Starting AWG in subthread...")
+        awg.AWGstartMultiple(self.getEnabledChannelsMask())
 
 
 if __name__ == '__main__':
