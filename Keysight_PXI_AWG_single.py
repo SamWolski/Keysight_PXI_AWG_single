@@ -12,10 +12,6 @@ sys.path.append('C:\\Program Files (x86)\\Keysight\\SD1\\Libraries\\Python')
 import keysightSD1
 
 
-## multiprocessing parameters
-address = ("localhost", 50020)
-
-
 ## Microsecond formatting for logger
 class MusecFormatter(logging.Formatter):
     converter=datetime.fromtimestamp
@@ -136,7 +132,7 @@ class Driver(LabberDriver):
         if self.starter_thread.is_alive():
             self._logger.debug("starter thread is alive at performClose; sending kill signal...")
             ## Start connection object
-            conn = multiprocessing.connection.Client(address, authkey=b"p")
+            conn = multiprocessing.connection.Client(("localhost", int(self.getValue("Digitizer TCP Port"))), authkey=b"p")
             conn.send("q")
             conn.close()
             self._logger.debug("Kill signal sent.")
@@ -548,7 +544,7 @@ class Driver(LabberDriver):
         
         ## Initialize multiprocessing Listener
         self._logger.debug("Initializing multiproc listener...")
-        listener = multiprocessing.connection.Listener(address, authkey=b"p")
+        listener = multiprocessing.connection.Listener(("localhost", int(self.getValue("Digitizer TCP Port"))), authkey=b"p")
         ## Blocking accept call - will continue when digitizer connects
         self._logger.debug("Listener initialized; accepting incoming connection...")
         conn = listener.accept()
